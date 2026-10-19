@@ -1,0 +1,7 @@
+streamlit
+groq
+pandas
+python-dotenv
+openpyxl
+httpx==0.27.2
+clipspy

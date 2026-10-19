@@ -1,0 +1,13 @@
+{
+  "fire_S":     {"3": {"supply_price": 45.50}, "4": {"supply_price": 62.00}, "6": {"supply_price": 98.75}, "8": {"supply_price": 145.00}},
+  "fire_SI":    {"3": {"supply_price": 45.50, "install_price": 25.00}, "4": {"supply_price": 62.00, "install_price": 32.00}, "6": {"supply_price": 98.75, "install_price": 48.50}, "8": {"supply_price": 145.00, "install_price": 72.00}},
+  "fire_ST":    {"3": {"supply_price": 45.50, "test_price": 8.00}, "4": {"supply_price": 62.00, "test_price": 10.50}, "6": {"supply_price": 98.75, "test_price": 15.00}, "8": {"supply_price": 145.00, "test_price": 20.00}},
+  "fire_SIT":   {"3": {"supply_price": 45.50, "install_price": 25.00, "test_price": 8.00}, "4": {"supply_price": 62.00, "install_price": 32.00, "test_price": 10.50}, "6": {"supply_price": 98.75, "install_price": 48.50, "test_price": 15.00}, "8": {"supply_price": 145.00, "install_price": 72.00, "test_price": 20.00}},
+  "sewage_S":   {"3": {"supply_price": 22.00}, "4": {"supply_price": 32.00}, "6": {"supply_price": 55.00}, "8": {"supply_price": 88.00}},
+  "sewage_SI":  {"3": {"supply_price": 22.00, "install_price": 12.00}, "4": {"supply_price": 32.00, "install_price": 16.00}, "6": {"supply_price": 55.00, "install_price": 28.00}, "8": {"supply_price": 88.00, "install_price": 42.00}},
+  "sewage_ST":  {"3": {"supply_price": 22.00, "test_price": 4.00}, "4": {"supply_price": 32.00, "test_price": 5.50}, "6": {"supply_price": 55.00, "test_price": 8.00}, "8": {"supply_price": 88.00, "test_price": 12.00}},
+  "sewage_SIT": {"3": {"supply_price": 22.00, "install_price": 12.00, "test_price": 4.00}, "4": {"supply_price": 32.00, "install_price": 16.00, "test_price": 5.50}, "6": {"supply_price": 55.00, "install_price": 28.00, "test_price": 8.00}, "8": {"supply_price": 88.00, "install_price": 42.00, "test_price": 12.00}},
+  "general_S":  {"3": {"supply_price": 40.00}, "4": {"supply_price": 55.00}, "6": {"supply_price": 85.00}, "8": {"supply_price": 125.00}},
+  "general_SI": {"3": {"supply_price": 40.00, "install_price": 20.00}, "4": {"supply_price": 55.00, "install_price": 28.00}, "6": {"supply_price": 85.00, "install_price": 40.00}, "8": {"supply_price": 125.00, "install_price": 60.00}},
+  "general_ST": {"3": {"supply_price": 40.00, "test_price": 6.00}, "4": {"supply_price": 55.00, "test_price": 8.00}, "6": {"supply_price": 85.00, "test_price": 12.00}, "8": {"supply_price": 125.00, "test_price": 18.00}},
+  "general_SIT":{"3": {"supply_price": 40.00, "install_price": 20.00, "test_price": 6.00}, "4": {"supply_price": 55.00, "install_price": 28.00, "test_price": 8.00}, "6": {"supply_price": 85.00, "install_price": 40.00, "test_price": 12.00}, "8": {"supply_price": 125.00, "install_price": 60.00, "test_price": 18.00}}

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI MEP Pricing Portal - Enterprise Client Version</title>
+    <!-- استدعاء محرك بايثون وجداول البيانات داخل المتصفح مباشرة وبالمجان وبأمان من الـ IT -->
+    <script src="https://jsdelivr.net"></script>
+    <script src="https://cloudflare.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 40px; color: #2c3e50; }
+        .container { max-width: 1200px; background: white; margin: 0 auto; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h1 { text-align: center; color: #2c3e50; margin-bottom: 5px; font-size: 26px; font-weight: 700; }
+        .subtitle { text-align: center; color: #7f8c8d; font-style: italic; margin-bottom: 30px; }
+        .grid { display: grid; grid-template-columns: 320px 1fr; gap: 30px; }
+        .sidebar { background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; height: fit-content; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; color: #34495e; }
+        input[type="number"], input[type="file"] { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+        .btn { display: block; width: 100%; padding: 12px; background: #2ecc71; color: white; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none; margin-top: 15px; }
+        .btn:hover { background: #27ae60; }
+        .btn-download { background: #3498db; margin-bottom: 20px; width: auto; float: right; padding: 10px 20px; }
+        .btn-download:hover { background: #2980b9; }
+        .status-msg { padding: 12px; border-radius: 6px; background-color: #e8f8f5; color: #117a65; font-weight: 600; text-align: center; margin-bottom: 20px; display: none; }
+        #loading-panel { text-align: center; padding: 20px; background-color: #fef9e7; color: #b7950b; font-weight: bold; border-radius: 6px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: none; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #e0e0e0; font-size: 14px; }
+        th { background-color: #34495e; color: white; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+        tr:hover { background-color: #f9fbfd; }
+        .footer { text-align: center; margin-top: 40px; font-size: 12px; color: #95a5a6; font-style: italic; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏗️ AI MEP Interactive Estimator Portal</h1>
+        <div class="subtitle">IT-Compliant Client Application running Python directly inside your browser container</div>
+        
+        <div id="loading-panel">⏳ Loading secure Web-Python Environment... Please wait.</div>
+        <div id="status-box" class="status-msg"></div>
+
+        <div class="grid">
+            <div class="sidebar">
+                <div class="form-group">
+                    <label>Project Markup Factor:</label>
+                    <input type="number" id="markup-input" step="0.05" value="1.00" min="1.00">
+                </div>
+                <div class="form-group">
+                    <label>Material Wastage Factor:</label>
+                    <input type="number" id="wastage-input" step="0.01" value="1.00" min="1.00">
+                </div>
+                <div class="form-group" style="margin-top: 20px;">
+                    <label>1. Upload Price Database (prices_database.xlsx):</label>
+                    <input type="file" id="db-file" accept=".xlsx">
+                </div>
+                <div class="form-group">
+                    <label>2. Upload Blank BOQ (boq.xlsx):</label>
+                    <input type="file" id="boq-file" accept=".xlsx">
+                </div>
+                <button class="btn" id="run-btn" onclick="executePricingPipeline()" disabled>🚀 Estimate BOQ</button>
+                <button class="btn btn-download" id="download-btn" style="display:none;" onclick="downloadPricedFile()">📥 Download Priced Excel</button>
+            </div>
+
+            <div>
+                <table id="result-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 55%; text-align: right; padding-right: 20px;">Item Description</th>
+                            <th>Qty</th>
+                            <th>Rate (EGP)</th>
+                            <th>Total (EGP)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="footer">100% Client-Side execution. No external server requests. Compliant with strict corporate security policies.</div>
+    </div>
+
+    <script>
+        let pyodideInstance;
+        let pricedWorkbookBytes;
+
+        // تهيئة بيئة بايثون داخل ذاكرة المتصفح تلقائياً بمجرد فتح الصفحة
+        async function initPythonInBrowser() {
+            try {
+                pyodideInstance = await loadPyodide();
+                await pyodideInstance.loadPackage(["pandas", "openpyxl"]);
+                
+                await pyodideInstance.runPythonAsync(`
+                    import pandas as pd
+                    import io
+                    
+                    def process_estimation(boq_bytes, db_bytes, markup, wastage):
+                        db_df = pd.read_excel(io.BytesIO(db_bytes.to_py()))
+                        db_df.columns = db_df.columns.str.strip()
+                        
+                        boq_df = pd.read_excel(io.BytesIO(boq_bytes.to_py()))
+                        boq_df.columns = boq_df.columns.str.strip()
+                        
+                        unit_rates, total_prices = [], []
+                        
+                        for idx, row in boq_df.iterrows():
+                            item_text = str(row['Item_Description']).lower()
+                            qty = float(row['Quantity'])
+                            
+                            matched_rate = 0.0
+                            has_supply = "توريد" in item_text or "supply" in item_text
+                            has_installation = "تركيب" in item_text or "مصنعية" in item_text
+                            
+                            if not has_supply and not has_installation:
+                                has_supply, has_installation = True, True
+                                
+                            for p_idx, p_row in db_df.iterrows():
+                                sz = str(p_row['size']).strip()
+                                mat = str(p_row['material']).lower().strip()
+                                
+                                # مطابقة هندسية ذكية وسريعة للأقطار والخامات
+                                if sz in item_text and (("حديد" in item_text and "steel" in mat) or ("pvc" in item_text and "pvc" in mat)):
+                                    cost = 0.0
+                                    if has_supply: cost += float(p_row.get('supply_price', 0)) * wastage
+                                    if has_installation: cost += float(p_row.get('installation_price', 0))
+                                    
+                                    for col in db_df.columns:
+                                        if col.lower() not in ['material', 'size', 'connection', 'supply_price', 'installation_price']:
+                                            try: cost += float(p_row[col])
+                                            except: pass
+                                    matched_rate = round(cost * markup, 2)
+                                    break
+                                    
+                            unit_rates.append(matched_rate)
+                            total_prices.append(round(matched_rate * qty, 2))
+                            
+                        boq_df['Unit_Rate_EGP'] = unit_rates
+                        boq_df['Total_Price_EGP'] = total_prices
+                        
+                        out_buffer = io.BytesIO()
+                        boq_df.to_excel(out_buffer, index=False)
+                        out_buffer.seek(0)
+                        
+                        # إرجاع مصفوفة البايتات وجدول البيانات بشكل صريح لتفادي خطأ الاختصار
+                        return [out_buffer.getvalue(), boq_df.to_dict(orient="records")]
+                `);
+                document.getElementById("loading-panel").style.display = "none";
+                document.getElementById("run-btn").disabled = false;
+                showStatus("✅ Python Core is initialized successfully! Portal is ready.");
+            } catch (err) {
+                document.getElementById("loading-panel").innerHTML = "❌ Error launching Python environment: " + err;
+            }
+        }
+
+        function showStatus(msg) {
+            let box = document.getElementById("status-box");
+            box.style.display = "block";
+            box.innerText = msg;
+        }
+
+        function getFileBytes(fileInput) {
+            return new Promise((resolve) => {
+                let reader = new FileReader();
+                reader.onload = (e) => resolve(new Uint8Array(e.target.result));
+                reader.readAsArrayBuffer(fileInput.files[0]); // إصلاح جلب الملف الأول
+            });
+        }
+
+        async function executePricingPipeline() {
+            let dbInput = document.getElementById("db-file");
+            let boqInput = document.getElementById("boq-file");
