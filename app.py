@@ -1,451 +1,177 @@
-# -*- coding: utf-8 -*-
-import os, sys, json, threading, webbrowser, time, io, re, gc, atexit, csv
-from datetime import datetime
-from pathlib import Path
-
-# إعداد المسار ليعمل على جهازك وعلى السحابة
-BASE_DIR = Path(__file__).resolve().parent
-os.chdir(str(BASE_DIR))
-sys.path.insert(0, str(BASE_DIR))
-
-from flask import Flask, render_template_string, request, jsonify
+import streamlit as st
+import os
+import json
+import pandas as pd
 from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
 
-try:
-    from engine.pricing_engine import PricingEngine, description_to_action_code
-    pricing_engine = PricingEngine()
-    print("[OK] Pricing engine loaded")
-except Exception as e:
-    print("[!] Pricing engine failed: " + str(e))
-    pricing_engine = None
+# 1. إعدادات الصفحة والتصميم الداكن
+st.set_page_config(page_title="AI MEP Estimator", page_icon="🏗️", layout="wide")
 
-app = Flask(__name__)
-
-# محاكاة حالة الموديلات لكي لا تظهر رسائل خطأ (بما أننا نستخدم Groq)
-class MockModelManager:
-    def __init__(self):
-        self.active = "Groq-API"
-    def status(self):
-        return {
-            'models': {
-                'groq': {'key': 'groq', 'name': 'Groq (Llama-3.3-70b)', 'type': 'llm', 'size_mb': 0, 'loaded': True, 'loading': False, 'error': None, 'active': True, 'can_orchestrate': True}
-            },
-            'active': self.active,
-            'ram': {'used_gb': 0, 'total_gb': 0, 'percent': 0}
-        }
-mm = MockModelManager()
-
-# ============================================================
-# HTML (نفس التصميم الذي في الصور الخمسة)
-# ============================================================
-HTML = r"""
-<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head>
-<meta charset="UTF-8">
-<title>AI MEP Estimator - CLIPS</title>
+st.markdown("""
 <style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',Tahoma,sans-serif}
-body{background:#0a0e17;color:#c9d1d9;height:100vh;display:flex;flex-direction:column;overflow:hidden}
-.hdr{background:#161b22;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #7b1fa2}
-.hdr h1{color:#c792ea;font-size:16px}
-.hdr .stats{font-size:12px;color:#8b949e}
-.hdr .stats b{color:#3fb950}
-.hdr .stats .active{color:#c792ea}
-.tabs{background:#0d1117;display:flex;border-bottom:1px solid #21262d;padding:0 15px;overflow-x:auto}
-.tab{padding:10px 20px;cursor:pointer;font-size:13px;font-weight:bold;color:#8b949e;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap}
-.tab:hover{color:#c9d1d9}
-.tab.on{color:#c792ea;border-bottom-color:#c792ea}
-.tab .badge{background:#c62828;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;margin-right:5px}
-.page{flex:1;overflow-y:auto;padding:15px;display:none}
-.page.on{display:block}
-.chat{display:flex;flex-direction:column;height:calc(100vh - 130px)}
-.messages{flex:1;overflow-y:auto;background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:15px;margin-bottom:10px}
-.msg{margin-bottom:12px;padding:10px 14px;border-radius:8px;font-size:14px;line-height:1.7;white-space:pre-wrap;word-wrap:break-word}
-.msg.user{background:#1a2a3a;margin-left:60px}
-.msg.bot{background:#2a1a3a;border-right:3px solid #c792ea;margin-right:60px}
-.msg.sys{background:#1a2a1a;color:#ffd700;font-size:11px;padding:5px 10px;margin-bottom:6px;border-radius:4px}
-.msg.err{background:#2a1a1a;color:#f44;font-size:12px}
-.msg.tool{background:#0a2a2a;color:#80cbc4;font-size:12px;border-right:3px solid #00897b;padding:8px 12px;margin:5px 0}
-.input-bar{display:flex;gap:8px}
-.input-bar textarea{flex:1;padding:12px;background:#0d1117;border:2px solid #21262d;border-radius:6px;color:#c9d1d9;font-size:14px;min-height:60px;resize:vertical;font-family:inherit}
-.input-bar textarea:focus{outline:none;border-color:#7b1fa2}
-.btn{padding:10px 20px;border:none;border-radius:6px;font-weight:bold;cursor:pointer;color:white;font-size:13px}
-.btn:hover{opacity:.85}
-.btn:disabled{opacity:.4;cursor:not-allowed}
-.btn-p{background:#7b1fa2}
-.btn-g{background:#238636}
-.btn-r{background:#c62828}
-.btn-b{background:#1976d2}
-.btn-o{background:#e65100}
-.models-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
-.mcard{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;position:relative}
-.mcard.act{border-color:#c792ea;box-shadow:0 0 0 2px #c792ea inset}
-.mcard .nm{font-weight:bold;margin-bottom:6px}
-.mcard .meta{font-size:11px;color:#8b949e;margin-bottom:8px}
-.mcard .btns{display:flex;gap:5px;flex-wrap:wrap}
-.mcard button{padding:4px 10px;border:none;border-radius:4px;font-size:11px;font-weight:bold;cursor:pointer;color:white}
-.mcard .tag{position:absolute;top:8px;left:8px;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:bold}
-.t-llm{background:#1f6feb}
-.pricing-toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
-.pricing-result{background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:15px;overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{padding:8px 12px;text-align:right;border-bottom:1px solid #21262d}
-th{background:#161b22;color:#c792ea;font-weight:bold;position:sticky;top:0}
-tr:hover{background:#161b22}
-tr.err{background:#2a1a1a}
-tr.ok{background:transparent}
-.total-row{background:#1a2a1a;font-weight:bold;color:#3fb950;font-size:15px}
-.empty{text-align:center;color:#8b949e;padding:40px;font-size:14px}
-.sys-tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:bold;margin-left:5px}
-.sys-fire{background:#c62828;color:#fff}
-.sys-sewage{background:#00897b;color:#fff}
-.sys-general{background:#616161;color:#fff}
+    /* تصميم داكن احترافي مشابه للواجهة الأصلية */
+    .stApp { background-color: #0a0e17; color: #c9d1d9; }
+    .stTextArea textarea { background-color: #0d1117; color: #c9d1d9; border: 1px solid #21262d; }
+    .stButton>button { background-color: #7b1fa2; color: white; border-radius: 6px; font-weight: bold; }
+    .stButton>button:hover { background-color: #9c27b0; color: white; }
+    .stTabs [data-baseweb="tab-list"] { gap: 24px; background-color: #0d1117; padding: 10px; border-radius: 8px; }
+    .stTabs [data-baseweb="tab"] { color: #8b949e; font-weight: bold; font-size: 16px; }
+    .stTabs [aria-selected="true"] { color: #c792ea !important; border-bottom-color: #c792ea !important; }
+    h1, h2, h3 { color: #c792ea !important; }
+    .stMetric { background-color: #161b22; padding: 15px; border-radius: 8px; border: 1px solid #30363d; }
 </style>
-</head>
-<body>
+""", unsafe_allow_html=True)
 
-<div class="hdr">
-<h1>🏗️ AI MEP Estimator</h1>
-<div class="stats">
-  RAM: <b id="ram">?</b> |
-  Orchestrator: <b class="active" id="active">GROQ API</b> |
-  CLIPS: <b id="clips">?</b> |
-  جداول: <b id="tablesCount">0</b>
-</div>
-</div>
+st.title("🏗️ AI MEP Estimator")
+st.markdown("نظام متكامل لاستخراج الكميات وتسعيرها (Groq AI + محرك الحسابات)")
 
-<div class="tabs">
-  <div class="tab on" data-page="chat">💬 المحادثة</div>
-  <div class="tab" data-page="pricing">💰 التسعير</div>
-  <div class="tab" data-page="pricedb">💵 الأسعار</div>
-  <div class="tab" data-page="models">🧠 الموديلات</div>
-  <div class="tab" data-page="files">📁 الملفات</div>
-</div>
-
-<div class="page on" id="page-chat">
-  <div class="chat">
-    <div class="messages" id="messages"></div>
-    <div class="input-bar">
-      <textarea id="userInput" placeholder="اكتب سؤالك... مثال: سعّر 100 متر مواسير حريق 6 بوصة توريد وتركيب مع الضريبة"></textarea>
-      <button class="btn btn-p" id="sendBtn" onclick="send()">إرسال</button>
-    </div>
-  </div>
-</div>
-
-<div class="page" id="page-pricing">
-  <div class="pricing-toolbar">
-    <button class="btn btn-o" onclick="document.getElementById('boqFile').click()">📊 رفع BOQ (Excel)</button>
-    <input type="file" id="boqFile" accept=".xlsx,.xls" style="display:none" onchange="uploadBOQ(event)">
-    <button class="btn btn-g" onclick="priceSingle()">💵 تسعير بند واحد</button>
-    <button class="btn btn-r" onclick="clearBOQ()">🗑️ مسح</button>
-  </div>
-  <div id="pricingContent">
-    <div class="empty">لم يتم رفع BOQ بعد. اضغط "رفع BOQ" لبدء التسعير.</div>
-  </div>
-</div>
-
-<div class="page" id="page-pricedb">
-  <div class="pricing-toolbar">
-    <button class="btn btn-b" onclick="reloadEngine()">🔄 إعادة تحميل المحرك</button>
-  </div>
-  <div id="priceDbInfo" style="margin-bottom:12px;color:#8b949e;font-size:13px">جارٍ التحميل...</div>
-  <div id="priceDbContent"></div>
-</div>
-
-<div class="page" id="page-models">
-  <div style="margin-bottom:12px;display:flex;gap:8px">
-    <div style="color:#c792ea;font-weight:bold;padding:10px;">✅ أنت تستخدم الآن ذكاء Groq الاصطناعي السحابي (لا حاجة لتحميل موديلات ثقيلة).</div>
-  </div>
-  <div class="models-grid" id="modelsGrid"></div>
-</div>
-
-<div class="page" id="page-files">
-  <div class="empty">لا توجد ملفات مرفوعة حالياً.</div>
-</div>
-
-<script>
-var bz = false;
-
-document.querySelectorAll('.tab').forEach(function(t) {
-  t.onclick = function() {
-    document.querySelectorAll('.tab').forEach(x => x.classList.remove('on'));
-    document.querySelectorAll('.page').forEach(x => x.classList.remove('on'));
-    t.classList.add('on');
-    document.getElementById('page-' + t.dataset.page).classList.add('on');
-    if (t.dataset.page === 'pricedb') loadPriceDb();
-  };
-});
-
-function addMsg(type, text) {
-  var d = document.createElement('div');
-  d.className = 'msg ' + type;
-  d.textContent = text;
-  var box = document.getElementById('messages');
-  box.appendChild(d);
-  box.scrollTop = box.scrollHeight;
-}
-
-async function send() {
-  if (bz) return;
-  var inp = document.getElementById('userInput');
-  var q = inp.value.trim();
-  if (!q) return;
-  inp.value = '';
-  addMsg('user', q);
-  bz = true;
-  document.getElementById('sendBtn').disabled = true;
-  try {
-    var r = await fetch('/chat', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({query: q})
-    });
-    var d = await r.json();
-    if (d.success) {
-      if (d.tools) addMsg('tool', '🔧 الأدوات المستخدمة: ' + d.tools);
-      addMsg('bot', d.answer);
-    } else {
-      addMsg('err', 'خطأ: ' + d.error);
-    }
-  } catch(e) {
-    addMsg('err', 'خطأ في الاتصال: ' + e.message);
-  }
-  bz = false;
-  document.getElementById('sendBtn').disabled = false;
-  inp.focus();
-}
-
-document.getElementById('userInput').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter' && e.ctrlKey) {
-    e.preventDefault();
-    send();
-  }
-});
-
-async function refreshStatus() {
-  try {
-    var r = await fetch('/status');
-    var d = await r.json();
-    document.getElementById('clips').textContent = d.clips_ready ? '✅' : '❌';
-    document.getElementById('tablesCount').textContent = d.tables_count || 0;
-    renderModels(d);
-  } catch(e) {}
-}
-
-function renderModels(d) {
-  var grid = document.getElementById('modelsGrid');
-  if (!grid) return;
-  grid.innerHTML = '';
-  for (var k in d.models) {
-    var m = d.models[k];
-    var card = document.createElement('div');
-    card.className = 'mcard' + (m.active ? ' act' : '');
-    var tagClass = 't-' + m.type;
-    card.innerHTML =
-      '<span class="tag ' + tagClass + '">' + m.type + '</span>' +
-      '<div class="nm">' + m.name + '</div>' +
-      '<div class="meta">سحابي (Cloud)<br>جاهز للاستخدام</div>' +
-      '<div class="btns"><button class="btn-p">★ نشط</button></div>';
-    grid.appendChild(card);
-  }
-}
-
-async function priceSingle() {
-  var desc = prompt('وصف البند:');
-  if (!desc) return;
-  var size = prompt('القطر (3، 4، 6، 8):', '6');
-  if (!size) return;
-  var action = prompt('الإجراء:', 'توريد وتركيب');
-  if (!action) return;
-  var system = prompt('النظام (fire / sewage / general):', 'general');
-  if (!system) return;
-  var qty = prompt('الكمية:', '1');
-  if (!qty) return;
-  var tax = confirm('إضافة ضريبة 14%؟');
-  var r = await fetch('/price_item', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({item_description: desc, size: size, action: action, system: system, quantity: parseFloat(qty), include_tax: tax})});
-  var d = await r.json();
-  if (d.success) {
-    alert('نتيجة CLIPS:\n\nالنظام: ' + d.result.system + '\nالكود: ' + d.result.action_code + '\nسعر الوحدة: ' + d.result.unit_price + '\nالإجمالي: ' + d.result.grand_total + ' EGP\n\nالجدول: ' + d.result.price_table);
-  } else {
-    alert('خطأ: ' + d.error);
-  }
-}
-
-async function reloadEngine() {
-  var r = await fetch('/reload_engine', {method:'POST'});
-  var d = await r.json();
-  alert(d.success ? '✅ المحرك جاهز (' + d.tables_count + ' جدول)' : '❌ فشل');
-  loadPriceDb();
-  refreshStatus();
-}
-
-async function loadPriceDb() {
-  try {
-    var r = await fetch('/list_price_tables');
-    var d = await r.json();
-    var info = document.getElementById('priceDbInfo');
-    var c = document.getElementById('priceDbContent');
-    if (!d.success || d.rows.length === 0) {
-      info.innerHTML = '⚠️ لا توجد أسعار بعد. تأكد من وجود ملف price_tables.json';
-      c.innerHTML = '';
-      return;
-    }
-    info.innerHTML = '<b style="color:#3fb950">✅ ' + d.count + ' جدول</b> مع ' + d.rows.length + ' سطر سعر';
-    var html = '<div class="pricing-result"><table>';
-    html += '<thead><tr><th>الجدول</th><th>القطر</th><th>توريد</th><th>تركيب</th><th>اختبار</th><th>سعر الوحدة</th></tr></thead><tbody>';
-    for (var i = 0; i < d.rows.length; i++) {
-      var r = d.rows[i];
-      var comp = r.components;
-      var s = comp.supply_price || 0;
-      var ins = comp.install_price || 0;
-      var t = comp.test_price || 0;
-      html += '<tr><td>' + r.table + '</td><td>' + r.size + '</td><td>' + (s ? s.toFixed(2) : '-') + '</td><td>' + (ins ? ins.toFixed(2) : '-') + '</td><td>' + (t ? t.toFixed(2) : '-') + '</td><td><b>' + (s+ins+t).toFixed(2) + '</b></td></tr>';
-    }
-    html += '</tbody></table></div>';
-    c.innerHTML = html;
-  } catch(e) {}
-}
-
-addMsg('sys', 'جاهز. اكتب طلبك وسيقوم Groq بتحليله ثم يحسبه محرك CLIPS.');
-setInterval(refreshStatus, 4000);
-refreshStatus();
-loadPriceDb();
-</script>
-</body>
-</html>
-"""
-
-# ============================================================
-# Routes
-# ============================================================
-@app.route('/')
-def index():
-    return render_template_string(HTML)
-
-@app.route('/status')
-def status_route():
-    s = mm.status()
-    s['clips_ready'] = (pricing_engine is not None and pricing_engine.env is not None)
-    s['tables_count'] = (len(pricing_engine.price_tables) if pricing_engine else 0)
-    return jsonify(s)
-
-@app.route('/chat', methods=['POST'])
-def chat_route():
-    d = request.json or {}
-    q = (d.get('query') or '').strip()
-    if not q:
-        return jsonify({'success': False, 'error': 'empty query'})
-    
-    api_key = os.getenv("GROQ_API_KEY", "").strip()
-    if not api_key:
-        return jsonify({'success': False, 'error': 'مفتاح Groq API غير موجود. يرجى إضافته في ملف .env'})
-
+# 2. تحميل قاعدة البيانات
+@st.cache_data
+def load_prices():
     try:
-        client = Groq(api_key=api_key)
-        prompt = f"""
-        You are an expert construction quantity surveyor.
-        Extract construction item details from this text: "{q}"
-        Return ONLY a valid JSON object with these exact keys:
-        - "item_name" (string, in Arabic)
-        - "size" (string, e.g., "3", "4", "6" for inches)
-        - "connection" (string, choose from: "Grooved", "Welded", "Solvent Welded", or "General")
-        - "action" (string, extract the actions in Arabic or English, e.g., "توريد وتركيب")
-        - "quantity" (number)
-        """
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            response_format={"type": "json_object"} 
-        )
-        
-        data = json.loads(response.choices[0].message.content)
-        
-        if pricing_engine:
-            result = pricing_engine.price_item(
-                item_description=data.get("item_name", ""),
-                size=data.get("size", ""),
-                connection=data.get("connection", "Grooved"),
-                action_code=None,
-                quantity=float(data.get("quantity", 0)),
-                include_tax=True
-            )
-            
-            if result.get('success'):
-                answer = f"✅ تم التسعير بنجاح بواسطة CLIPS:\n\n"
-                answer += f"البند: {result['item']}\n"
-                answer += f"القطر: {result['size']}\"\n"
-                answer += f"الكمية: {result['quantity']}\n"
-                answer += f"سعر الوحدة: {result['unit_price']} EGP\n"
-                answer += f"الإجمالي (مع الضريبة والخصم): {result['grand_total']} EGP\n"
-                return jsonify({'success': True, 'answer': answer, 'tools': 'Groq + CLIPS'})
-            else:
-                return jsonify({'success': False, 'error': f"CLIPS Error: {result.get('error')}"})
-        else:
-            return jsonify({'success': False, 'error': 'محرك CLIPS غير متاح'})
-            
+        with open('rules/price_tables.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        st.error(f"⚠️ خطأ في تحميل ملف الأسعار: {e}")
+        return {}
 
-@app.route('/price_item', methods=['POST'])
-def price_item_route():
-    d = request.json or {}
-    if pricing_engine:
-        r = pricing_engine.price_item(
-            d.get('item_description', ''),
-            d.get('size', ''),
-            connection=d.get('connection', 'Grooved'),
-            action_code=d.get('action', ''),
-            quantity=d.get('quantity', 0),
-            include_tax=d.get('include_tax', False),
+prices_db = load_prices()
+
+# 3. الشريط الجانبي
+with st.sidebar:
+    st.header("⚙️ الإعدادات")
+    env_key = os.getenv("GROQ_API_KEY", "")
+    try:
+        if "GROQ_API_KEY" in st.secrets: env_key = st.secrets["GROQ_API_KEY"]
+    except: pass
+        
+    api_key_input = st.text_input("مفتاح Groq API:", value=env_key, type="password")
+    final_api_key = api_key_input.strip()
+    
+    if final_api_key: st.success("✅ المفتاح جاهز")
+    else: st.warning("⚠️ أدخل المفتاح")
+    
+    st.info(f"📊 تم تحميل {len(prices_db)} جدول أسعار")
+
+# 4. محرك التسعير (بديل CLIPS بلغة بايثون)
+def calculate_pricing(item_name, size, action, quantity):
+    # تحديد النظام (حريق، صرف، عام)
+    system = "general"
+    if "حريق" in item_name or "fire" in item_name.lower(): system = "fire"
+    elif "صرف" in item_name or "sewage" in item_name.lower(): system = "sewage"
+    
+    # تحديد كود الإجراء (توريد، تركيب، اختبار)
+    code = ""
+    if "توريد" in action or "supply" in action.lower(): code += "S"
+    if "تركيب" in action or "install" in action.lower(): code += "I"
+    if "اختبار" in action or "test" in action.lower(): code += "T"
+    if not code: code = "S" # افتراضي
+    
+    table_name = f"{system}_{code}"
+    
+    # إذا لم يوجد الجدول، نجرب الجدول الأساسي S
+    if table_name not in prices_db:
+        table_name = f"{system}_S"
+        
+    table = prices_db.get(table_name, {})
+    size_data = table.get(str(size), {})
+    
+    if not size_data:
+        return None
+        
+    # حساب السعر
+    unit_price = sum(size_data.values())
+    subtotal = unit_price * quantity
+    tax = subtotal * 0.14 # ضريبة 14%
+    before_discount = subtotal + tax
+    
+    discount = 0.0
+    if quantity > 100:
+        discount = before_discount * 0.05 # خصم 5%
+        
+    grand_total = before_discount - discount
+    
+    return {
+        "table_used": table_name,
+        "unit_price": unit_price,
+        "subtotal": subtotal,
+        "tax": tax,
+        "discount": discount,
+        "grand_total": grand_total
+    }
+
+# 5. إنشاء التبويبات (Tabs)
+tab1, tab2 = st.tabs(["💬 المحادثة والتسعير", "💵 قاعدة الأسعار"])
+
+# --- التبويب الأول ---
+with tab1:
+    with st.form("estimator_form"):
+        project_description = st.text_area(
+            "وصف البند:",
+            height=100,
+            placeholder="مثال: توريد وتركيب مواسير حريق 4 بوصة، الكمية 120"
         )
-        r['system'] = d.get('system', 'general')
-        if r.get('success'):
-            return jsonify({'success': True, 'result': r})
-        return jsonify({'success': False, 'error': r.get('error', '?')})
-    return jsonify({'success': False, 'error': 'محرك CLIPS غير متاح'})
+        submitted = st.form_submit_button("🚀 استخراج وتسعير")
 
-@app.route('/reload_engine', methods=['POST'])
-def reload_engine_route():
-    if pricing_engine is None:
-        return jsonify({'success': False, 'error': 'محرك CLIPS غير متاح'})
-    ok = pricing_engine.reload()
-    return jsonify({'success': ok, 'tables_count': len(pricing_engine.price_tables)})
+    if submitted:
+        if not final_api_key:
+            st.error("⚠️ يرجى إدخال مفتاح Groq API.")
+        elif not project_description.strip():
+            st.warning("⚠️ الرجاء إدخال وصف المشروع.")
+        else:
+            with st.spinner("⏳ جاري تحليل النص بواسطة Groq وحساب التكلفة..."):
+                try:
+                    client = Groq(api_key=final_api_key)
+                    prompt = f"""
+                    Extract construction details from: "{project_description}"
+                    Return ONLY a JSON object with these keys:
+                    - "item_name" (string in Arabic)
+                    - "size" (string, e.g., "3", "4", "6")
+                    - "action" (string, e.g., "توريد وتركيب")
+                    - "quantity" (number)
+                    """
+                    response = client.chat.completions.create(
+                        model="openai/gpt-oss-120b",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0,
+                        response_format={"type": "json_object"} 
+                    )
+                    
+                    data = json.loads(response.choices[0].message.content)
+                    
+                    result = calculate_pricing(
+                        data.get("item_name", ""),
+                        data.get("size", ""),
+                        data.get("action", ""),
+                        float(data.get("quantity", 0))
+                    )
+                    
+                    if result:
+                        st.success("✅ تم التسعير بنجاح!")
+                        col1, col2, col3, col4 = st.columns(4)
+                        col1.metric("سعر الوحدة", f"{result['unit_price']:.2f} EGP")
+                        col2.metric("الضريبة (14%)", f"{result['tax']:.2f} EGP")
+                        col3.metric("الخصم", f"{result['discount']:.2f} EGP")
+                        col4.metric("الإجمالي النهائي", f"{result['grand_total']:.2f} EGP")
+                        
+                        with st.expander("عرض تفاصيل الحساب (JSON)"):
+                            st.json({"AI_Extracted": data, "Pricing_Engine": result})
+                    else:
+                        st.warning("⚠️ لم يتم العثور على سعر مطابق لهذا القطر في قاعدة البيانات.")
+                        
+                except Exception as e:
+                    st.error(f"❌ حدث خطأ: {str(e)}")
 
-@app.route('/list_price_tables')
-def list_price_tables_route():
-    if pricing_engine is None:
-        return jsonify({'success': False, 'tables': [], 'rows': [], 'count': 0})
-    summary = []
-    for name, sizes in pricing_engine.price_tables.items():
-        for size, comps in sizes.items():
-            summary.append({'table': name, 'size': size, 'components': comps})
-    return jsonify({'success': True, 'count': len(pricing_engine.price_tables), 'rows': summary})
-
-@app.route('/clear_boq', methods=['POST'])
-def clear_boq_route():
-    return jsonify({'success': True})
-
-@app.route('/upload_boq', methods=['POST'])
-def upload_boq_route():
-    return jsonify({'success': False, 'error': 'ميزة رفع BOQ غير مفعلة في هذه النسخة السريعة.'})
-
-# ============================================================
-# Main
-# ============================================================
-if __name__ == "__main__":
-    def ob():
-        time.sleep(1.5)
-        try: webbrowser.open('http://127.0.0.1:5000')
-        except Exception: pass
-
-    print("=" * 60)
-    print("AI MEP Estimator Web — http://127.0.0.1:5000")
-    print("=" * 60)
-    threading.Thread(target=ob, daemon=True).start()
-    port = int(os.environ.get('PORT', 5000))
-app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
+# --- التبويب الثاني ---
+with tab2:
+    st.subheader("جداول الأسعار المتاحة")
+    if prices_db:
+        selected_table = st.selectbox("اختر جدولاً للعرض:", list(prices_db.keys()))
+        if selected_table:
+            df = pd.DataFrame.from_dict(prices_db[selected_table], orient='index')
+            st.dataframe(df, use_container_width=True)
+    else:
+        st.warning("⚠️ قاعدة البيانات فارغة أو غير موجودة.")
