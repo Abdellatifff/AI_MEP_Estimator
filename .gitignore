@@ -3,4 +3,7 @@ venv/
 type.env
 __pycache__/
 *.pyc
-.streamlit/secrets.toml
+.streamlit/secrets.toml*.xlsx
+*.xls
+*.gguf
+*.zip
