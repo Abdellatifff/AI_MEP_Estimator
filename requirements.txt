@@ -3,3 +3,4 @@ groq
 pandas
 python-dotenv
 openpyxl
+starlette<0.47.0

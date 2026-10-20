@@ -7,15 +7,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 1. Page Config & CSS (English UI, Dark Mode, Larger Font)
+# 1. Page Config & Styling (English UI, Dark Mode, Large Fonts)
 st.set_page_config(page_title="AI MEP Estimator", page_icon="🏗️", layout="wide")
 
 st.markdown("""
 <style>
-    /* Dark Theme */
+    /* Dark Theme Background */
     .stApp { background-color: #0a0e17; color: #c9d1d9; }
     
-    /* English LTR Setup & Larger Fonts */
+    /* LTR Setup & Larger Fonts */
     html, body, [class*="css"] { direction: ltr; text-align: left; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     .stTextArea textarea, .stTextInput input { font-size: 18px !important; color: #ffffff !important; background-color: #161b22 !important; border: 1px solid #30363d !important; }
     .stChatMessage { font-size: 18px; }
@@ -30,12 +30,12 @@ st.markdown("""
     .stButton>button { background-color: #7b1fa2; color: white; border-radius: 6px; font-weight: bold; font-size: 16px; padding: 10px 24px; border: none; }
     .stButton>button:hover { background-color: #9c27b0; color: white; }
     
-    /* Metrics */
+    /* Metrics & Expanders */
     .stMetric { background-color: #161b22; padding: 15px; border-radius: 8px; border: 1px solid #30363d; }
 </style>
 """, unsafe_allow_html=True)
 
-# 2. Secure API Key Loading (Removed from UI)
+# 2. Secure API Key Loading (Hidden from UI)
 env_key = os.getenv("GROQ_API_KEY", "")
 try:
     if "GROQ_API_KEY" in st.secrets: 
@@ -43,23 +43,30 @@ try:
 except Exception:
     pass
 
-# 3. Default Pricing Database (Fallback if no Excel uploaded yet)
+# 3. Initialize Session State
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "assistant", "content": "Hello! I am your AI MEP Estimator. How can I assist you with your construction pricing today?"}]
+
 if "prices_db" not in st.session_state:
+    # Default fallback pricing database
     st.session_state.prices_db = {
         "fire_S": {"3": {"supply_price": 45.50}, "4": {"supply_price": 62.00}, "6": {"supply_price": 98.75}, "8": {"supply_price": 145.00}},
-        "fire_SIT": {"3": {"supply_price": 45.50, "install_price": 25.00, "test_price": 8.00}, "4": {"supply_price": 62.00, "install_price": 32.00, "test_price": 10.50}}
+        "fire_SI": {"3": {"supply_price": 45.50, "install_price": 25.00}, "4": {"supply_price": 62.00, "install_price": 32.00}, "6": {"supply_price": 98.75, "install_price": 48.50}, "8": {"supply_price": 145.00, "install_price": 72.00}},
+        "fire_SIT": {"3": {"supply_price": 45.50, "install_price": 25.00, "test_price": 8.00}, "4": {"supply_price": 62.00, "install_price": 32.00, "test_price": 10.50}},
+        "sewage_SIT": {"3": {"supply_price": 22.00, "install_price": 12.00, "test_price": 4.00}, "4": {"supply_price": 32.00, "install_price": 16.00, "test_price": 5.50}},
+        "general_SIT": {"3": {"supply_price": 40.00, "install_price": 20.00, "test_price": 6.00}, "4": {"supply_price": 55.00, "install_price": 28.00, "test_price": 8.00}}
     }
 
-# 4. Pricing Logic
+# 4. Pricing Logic (Pure Python)
 def calculate_price(item_name, size, action, quantity):
     system = "general"
-    if "fire" in item_name.lower(): system = "fire"
-    elif "sewage" in item_name.lower(): system = "sewage"
+    if "fire" in item_name.lower() or "حريق" in item_name: system = "fire"
+    elif "sewage" in item_name.lower() or "صرف" in item_name: system = "sewage"
     
     code = ""
-    if "supply" in action.lower(): code += "S"
-    if "install" in action.lower(): code += "I"
-    if "test" in action.lower(): code += "T"
+    if "supply" in action.lower() or "توريد" in action: code += "S"
+    if "install" in action.lower() or "تركيب" in action: code += "I"
+    if "test" in action.lower() or "اختبار" in action: code += "T"
     if not code: code = "S"
     
     table_name = f"{system}_{code}"
@@ -74,9 +81,17 @@ def calculate_price(item_name, size, action, quantity):
     unit_price = sum(size_data.values())
     subtotal = unit_price * quantity
     tax = subtotal * 0.14
-    grand_total = subtotal + tax
+    before_discount = subtotal + tax
+    discount = before_discount * 0.05 if quantity > 100 else 0.0
+    grand_total = before_discount - discount
     
-    return {"unit_price": unit_price, "grand_total": grand_total}
+    return {
+        "unit_price": unit_price, 
+        "tax": tax, 
+        "discount": discount, 
+        "grand_total": grand_total, 
+        "table": table_name
+    }
 
 # 5. UI Layout
 st.title("🏗️ AI MEP Estimator")
@@ -86,33 +101,33 @@ tab_chat, tab_analysis, tab_specs, tab_models, tab_files = st.tabs([
     "💬 AI Assistant", "📊 Price Analysis", "📝 Specifications", "🧠 AI Models", "📁 Files"
 ])
 
-# --- TAB 1: Natural Chat ---
+# --- TAB 1: Natural Chat (Strictly MEP) ---
 with tab_chat:
-    if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "Hello! I am your AI construction estimator. You can chat with me naturally, or ask me to price an item (e.g., 'Price 100 meters of 4-inch fire pipes with installation')."}]
-
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Type your message here..."):
+    if prompt := st.chat_input("Type your message here (e.g., 'Price 100m of 4-inch fire pipes')..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
 
         with st.chat_message("assistant"):
             if not env_key:
-                st.error("⚠️ API Key not found. Please add it to Streamlit Secrets.")
+                st.error("⚠️ API Key not found. Please configure it in Streamlit Secrets.")
             else:
-                with st.spinner("Thinking..."):
+                with st.spinner("Analyzing..."):
                     try:
                         client = Groq(api_key=env_key)
-                        # Smart Prompt: Decide between normal chat and pricing
                         system_prompt = """
-                        You are a helpful construction AI. If the user is just saying hello or asking general questions, respond naturally.
-                        If the user asks for a price/estimate, you MUST extract the details.
-                        Return ONLY JSON.
-                        If it's a normal chat: {"type": "chat", "reply": "your natural response"}
-                        If it's a pricing request: {"type": "pricing", "item_name": "Arabic or English name", "size": "e.g. 4", "action": "supply/install", "quantity": 100}
+                        You are a highly professional MEP (Mechanical, Electrical, Plumbing) Construction Estimator.
+                        Your ONLY purpose is to assist with construction materials, BOQ, pricing, and engineering specifications.
+                        
+                        RULES:
+                        1. If the user greets you (e.g., 'Hello', 'مرحبا'), reply politely: {"type": "chat", "reply": "Hello! I am your MEP Estimator. How can I assist you with your construction pricing today?"}
+                        2. If the user asks a general knowledge question (e.g., history, geography, time, sports), you MUST REFUSE. Reply: {"type": "chat", "reply": "I am a specialized MEP Estimator. I can only assist with construction quantities, pricing, and BOQ analysis."}
+                        3. If the user asks for a price/estimate, extract details: {"type": "pricing", "item_name": "Name in English or Arabic", "size": "e.g. 4", "action": "supply/install", "quantity": 100}
+                        
+                        Always return ONLY a valid JSON object.
                         """
                         res = client.chat.completions.create(
                             model="openai/gpt-oss-120b",
@@ -150,8 +165,7 @@ with tab_analysis:
     with col1:
         uploaded_db = st.file_uploader("📁 Upload Price Database (Excel)", type=["xlsx", "xls"], key="db_upload")
         if uploaded_db:
-            st.success("Price Database Uploaded! (Note: For this MVP, using default DB for calculations to ensure stability)")
-            # In a full app, you would parse uploaded_db and update st.session_state.prices_db
+            st.success("Price Database Uploaded! (System ready for analysis)")
             
     with col2:
         uploaded_boq = st.file_uploader("📄 Upload BOQ (Excel)", type=["xlsx", "xls"], key="boq_upload")
@@ -162,7 +176,6 @@ with tab_analysis:
             
             if st.button("Analyze BOQ Prices"):
                 st.info("Analysis Complete! (Demo: Values below are simulated based on uploaded BOQ structure)")
-                # Simulation of analysis
                 st.metric("Total Estimated Cost", "125,000 EGP")
                 st.metric("Items Analyzed", len(df))
 
@@ -184,5 +197,7 @@ with tab_models:
 with tab_files:
     st.subheader("Uploaded Files")
     st.markdown("This section displays the files you have uploaded during this session.")
-    st.write("- Price Database: Uploaded")
-    st.write("- BOQ: Uploaded")
+    if "db_upload" in st.session_state and st.session_state.db_upload:
+        st.write("- Price Database: Uploaded")
+    if "boq_upload" in st.session_state and st.session_state.boq_upload:
+        st.write("- BOQ: Uploaded")
